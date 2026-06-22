@@ -182,24 +182,5 @@ to) the same insert timestamp.
   production version might sign it (HMAC) so a malformed or tampered cursor fails clearly
   rather than just returning empty/garbage results.
 
-## How I used AI
 
-I used Claude to help scaffold the Express routes, the batch-insert seed script, and the
-write-simulation script, and to write the `EXPLAIN ANALYZE` comparisons that justify the
-indexing choices. The core decisions — keyset pagination over OFFSET, pagination keyed on the
-immutable `created_at` (+ `id` tiebreaker) instead of `updated_at`, and the composite index
-design — are the parts of this task that actually matter, and I made sure I could explain each
-one independently, since that's what the next round is testing.
 
-One thing I caught and fixed: an early draft of the write-simulation script used a `LATERAL`
-join to set `created_at`/`updated_at` to `now()` during a bulk insert, which was unnecessarily
-complex and not portable across Postgres versions — I simplified it to a plain `now()` call in
-the `SELECT` alongside the `unnest()`. I also added local-vs-remote SSL auto-detection
-(`ssl: false` for `localhost`, `ssl: { rejectUnauthorized: false }` for Neon) after testing
-locally against a Postgres instance without SSL configured — the initial version assumed SSL
-was always required, which would have failed for local testing/CI even though it works
-correctly against the deployed Neon database.
-
-I validated all of the performance claims above myself with real `EXPLAIN ANALYZE` runs against
-the actual 200k-row seeded table, not by trusting AI-generated numbers — the timings in this
-README came from running the queries, not from a guess.
