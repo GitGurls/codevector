@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Product Catalog — 200k Browser</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161922;
+    --border: #262a35;
+    --text: #e6e8ec;
+    --muted: #8b92a3;
+    --accent: #5ee0a8;
+    --accent-dim: #2a4f3f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  header h1 {
+    font-size: 18px;
+    margin: 0;
+    letter-spacing: 0.3px;
+  }
+  header h1 span { color: var(--accent); }
+  .controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  select, button {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  select { min-width: 200px; cursor: pointer; }
+  button {
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover:not(:disabled) { background: var(--accent-dim); border-color: var(--accent); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .meta-bar {
+    padding: 12px 32px;
+    color: var(--muted);
+    font-size: 13px;
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+  }
+  main { padding: 24px 32px 60px; max-width: 1100px; margin: 0 auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  thead th {
+    text-align: left;
+    color: var(--muted);
+    font-weight: 500;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.1s;
+  }
+  tbody tr:hover { background: var(--panel); }
+  tbody td { padding: 12px; }
+  .id-cell { color: var(--muted); font-family: monospace; font-size: 12px; }
+  .category-pill {
+    background: var(--accent-dim);
+    color: var(--accent);
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    display: inline-block;
+  }
+  .price { font-family: monospace; }
+  .pagination {
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    margin-top: 24px;
+  }
+  .empty, .loading {
+    text-align: center;
+    color: var(--muted);
+    padding: 60px 0;
+  }
+  .badge-new {
+    background: var(--accent);
+    color: #07140d;
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    margin-left: 8px;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Product<span>Browse</span> — 200,000 items</h1>
+  <div class="controls">
+    <select id="categorySelect">
+      <option value="all">All categories</option>
+    </select>
+    <button id="refreshBtn" title="Re-fetch from page 1">↻ Refresh</button>
+  </div>
+</header>
+
+<div class="meta-bar">
+  <span id="countLabel">Loading total count…</span>
+  <span id="pageLabel">Page 1</span>
+</div>
+
+<main>
+  <div id="content">
+    <div class="loading">Loading products…</div>
+  </div>
+  <div class="pagination">
+    <button id="prevBtn" disabled>← Previous</button>
+    <button id="nextBtn" disabled>Next →</button>
+  </div>
+</main>
+
+<script>
+const API_BASE = ''; // same origin
+const PAGE_SIZE = 20;
+
+let currentCategory = 'all';
+let cursorHistory = [null]; // cursorHistory[pageIndex] = cursor used to FETCH that page
+let pageIndex = 0;
+let nextCursor = null;
+let recentlySeenIds = new Set(JSON.parse(localStorage.getItem('seenIds') || '[]'));
+
+const contentEl = document.getElementById('content');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const pageLabel = document.getElementById('pageLabel');
+const countLabel = document.getElementById('countLabel');
+const categorySelect = document.getElementById('categorySelect');
+const refreshBtn = document.getElementById('refreshBtn');
+
+function formatDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) +
+    ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+}
+
+function formatPrice(p) {
+  return '₹' + Number(p).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+}
+
+async function loadCategories() {
+  const res = await fetch(`${API_BASE}/api/categories`);
+  const { categories } = await res.json();
+  categories.forEach((c) => {
+    const opt = document.createElement('option');
+    opt.value = c;
+    opt.textContent = c;
+    categorySelect.appendChild(opt);
+  });
+}
+
+async function loadCount() {
+  const url = currentCategory === 'all'
+    ? `${API_BASE}/api/products/count`
+    : `${API_BASE}/api/products/count?category=${encodeURIComponent(currentCategory)}`;
+  const res = await fetch(url);
+  const { count } = await res.json();
+  countLabel.textContent = `${count.toLocaleString('en-IN')} products${currentCategory !== 'all' ? ' in ' + currentCategory : ' total'}`;
+}
+
+async function fetchPage(cursor) {
+  contentEl.innerHTML = '<div class="loading">Loading…</div>';
+  const params = new URLSearchParams({ limit: PAGE_SIZE });
+  if (cursor) params.set('cursor', cursor);
+  if (currentCategory !== 'all') params.set('category', currentCategory);
+
+  const res = await fetch(`${API_BASE}/api/products?${params.toString()}`);
+  const { data, nextCursor: nc } = await res.json();
+  nextCursor = nc;
+  renderTable(data);
+  nextBtn.disabled = !nc;
+  prevBtn.disabled = pageIndex === 0;
+  pageLabel.textContent = `Page ${pageIndex + 1}`;
+}
+
+function renderTable(rows) {
+  if (rows.length === 0) {
+    contentEl.innerHTML = '<div class="empty">No products found.</div>';
+    return;
+  }
+
+  const seen = recentlySeenIds;
+  const rowsHtml = rows.map((p) => {
+    const isNew = !seen.has(p.id);
+    return `
+      <tr>
+        <td class="id-cell">${p.id.slice(0, 8)}…</td>
+        <td>${escapeHtml(p.name)}${isNew ? '<span class="badge-new">NEW</span>' : ''}</td>
+        <td><span class="category-pill">${escapeHtml(p.category)}</span></td>
+        <td class="price">${formatPrice(p.price)}</td>
+        <td>${formatDate(p.created_at)}</td>
+        <td>${formatDate(p.updated_at)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  rows.forEach((p) => seen.add(p.id));
+  localStorage.setItem('seenIds', JSON.stringify([...seen].slice(-2000)));
+
+  contentEl.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Name</th><th>Category</th><th>Price</th><th>Created</th><th>Updated</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  `;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function resetPagination() {
+  cursorHistory = [null];
+  pageIndex = 0;
+  nextCursor = null;
+}
+
+nextBtn.addEventListener('click', () => {
+  if (!nextCursor) return;
+  cursorHistory[pageIndex + 1] = nextCursor;
+  pageIndex += 1;
+  fetchPage(cursorHistory[pageIndex]);
+});
+
+prevBtn.addEventListener('click', () => {
+  if (pageIndex === 0) return;
+  pageIndex -= 1;
+  fetchPage(cursorHistory[pageIndex]);
+});
+
+categorySelect.addEventListener('change', (e) => {
+  currentCategory = e.target.value;
+  resetPagination();
+  loadCount();
+  fetchPage(null);
+});
+
+refreshBtn.addEventListener('click', () => {
+  resetPagination();
+  loadCount();
+  fetchPage(null);
+});
+
+(async function init() {
+  await loadCategories();
+  await loadCount();
+  await fetchPage(null);
+})();
+</script>
+
+</body>
+</html>

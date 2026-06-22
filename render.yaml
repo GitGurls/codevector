@@ -1,0 +1,16 @@
+# Render Blueprint - optional, lets you deploy via "New + Blueprint" on Render
+# pointing at this repo. You still need to set DATABASE_URL manually in the
+# Render dashboard (Environment tab) since it's a secret and shouldn't live
+# in this file.
+services:
+  - type: web
+    name: codevector-products
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: NODE_VERSION
+        value: 20.11.0
