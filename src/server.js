@@ -1,47 +1,4 @@
-// src/server.js
-//
-// API for browsing 200k products, newest first, with category filter
-// and keyset (cursor) pagination.
-//
-// WHY KEYSET PAGINATION INSTEAD OF OFFSET/LIMIT:
-//
-//   OFFSET-based: "SELECT * FROM products ORDER BY created_at DESC
-//                  LIMIT 20 OFFSET 50000"
-//   Postgres has to walk through and discard 50,000 rows every time you ask
-//   for a deep page. That gets linearly slower the further you page in.
-//   On 200k rows this is noticeable; it would be much worse at scale.
-//
-//   Keyset-based: "...WHERE (created_at, id) < ($lastCreatedAt, $lastId)
-//                  ORDER BY created_at DESC, id DESC LIMIT 20"
-//   This uses the composite index directly: Postgres seeks straight to
-//   the right spot in the index and reads forward 20 rows. Cost is
-//   independent of how deep you are in the list (O(log n) seek + O(page size)).
-//
-// WHY (created_at, id) AS A PAIR, NOT created_at ALONE:
-//   created_at is not unique (many products can share a timestamp,
-//   especially with random seed data). Using created_at alone as a cursor
-//   can skip or repeat rows that share the exact same timestamp. Adding
-//   id as a tiebreaker makes the sort order (and therefore the cursor)
-//   strictly unique, so every row has one unambiguous position.
-//
-// WHY THIS STAYS CORRECT WHILE DATA IS CHANGING (the "50 products added
-// or updated mid-browse" requirement):
-//   - created_at is set once at INSERT time and never changes again.
-//     Sorting/paginating on an immutable column means a row's position in
-//     the "newest first" ordering never shifts after the fact.
-//   - New inserts always land at the very front (they have the newest
-//     created_at), so they appear ahead of your cursor, not interleaved
-//     into pages you've already fetched - you simply see them next time
-//     you go back to page 1, never as a duplicate deeper in your scroll.
-//   - Updates change updated_at and other columns, but NOT created_at,
-//     so an edited product keeps its exact same position in the feed.
-//     You'll see its fresh data if you land on that page, but it will
-//     not duplicate elsewhere or vanish from where it belongs.
-//   - Contrast with OFFSET pagination: if row #5 gets deleted while
-//     you're viewing page 1 (offset 0), everything shifts up by one and
-//     page 2 (offset 20) now starts one row early - you'd silently skip
-//     a row. Keyset pagination has no such shifting because the cursor
-//     is a value, not a position/count.
+
 
 require('dotenv').config();
 const express = require('express');
@@ -56,8 +13,7 @@ app.use(express.static('public'));
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 
-// Encode/decode the cursor as a base64 string so it's an opaque token to
-// the client (they shouldn't need to know or care it's "created_at + id").
+
 function encodeCursor(createdAt, id) {
   const raw = JSON.stringify({ createdAt, id });
   return Buffer.from(raw, 'utf8').toString('base64url');
@@ -74,20 +30,7 @@ function decodeCursor(cursorStr) {
   }
 }
 
-/**
- * GET /api/products
- * Query params:
- *   - category (optional): exact category match
- *   - limit (optional): page size, default 20, max 100
- *   - cursor (optional): opaque cursor from the previous page's nextCursor.
- *                         Omit to get the first page (newest products).
- *
- * Response:
- *   {
- *     data: [ { id, name, category, price, created_at, updated_at }, ... ],
- *     nextCursor: string | null   // pass this back to get the next page
- *   }
- */
+
 app.get('/api/products', async (req, res) => {
   try {
     const limit = Math.min(
@@ -169,9 +112,7 @@ app.get('/api/categories', async (req, res) => {
   }
 });
 
-// Quick count for the UI header ("Showing X of 200,000 products").
-// Uses an exact count; fine at 200k rows, would switch to an estimate
-// (reltuples from pg_class) if this needed to scale to tens of millions.
+
 app.get('/api/products/count', async (req, res) => {
   try {
     const category = req.query.category && req.query.category !== 'all'
